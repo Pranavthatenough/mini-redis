@@ -1,8 +1,10 @@
 package main
 
 import (
+	"strconv"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestSetGet(t *testing.T) {
@@ -73,5 +75,75 @@ func TestConcurrentIncr(t *testing.T) {
 	got, _ := s.Get("counter")
 	if got != "10000" {
 		t.Fatalf("got %s, want 10000", got)
+	}
+}
+func TestExpiry(t *testing.T) {
+	s := NewStore()
+	s.SetWithTTL("temp", "hi", 50*time.Millisecond)
+
+	if _, ok := s.Get("temp"); !ok {
+		t.Fatal("key should exist before it expires")
+	}
+
+	time.Sleep(80 * time.Millisecond)
+
+	if _, ok := s.Get("temp"); ok {
+		t.Fatal("key should be gone after it expires")
+	}
+	if s.Exists("temp") {
+		t.Fatal("Exists should be false after expiry")
+	}
+}
+
+func TestTTL(t *testing.T) {
+	s := NewStore()
+
+	if got := s.PTTL("missing"); got != ttlMissing {
+		t.Fatalf("missing key: got %d, want %d", got, ttlMissing)
+	}
+
+	s.Set("a", "1")
+	if got := s.PTTL("a"); got != ttlNoExpiry {
+		t.Fatalf("no expiry: got %d, want %d", got, ttlNoExpiry)
+	}
+
+	s.Expire("a", 10*time.Second)
+	if got := s.PTTL("a"); got <= 9000 || got > 10000 {
+		t.Fatalf("after EXPIRE 10s: got %d ms, want about 10000", got)
+	}
+
+	if !s.Persist("a") {
+		t.Fatal("Persist should report it removed a timeout")
+	}
+	if got := s.PTTL("a"); got != ttlNoExpiry {
+		t.Fatalf("after PERSIST: got %d, want %d", got, ttlNoExpiry)
+	}
+}
+
+func TestSetClearsTTL(t *testing.T) {
+	s := NewStore()
+	s.SetWithTTL("a", "1", time.Minute)
+	s.Set("a", "2") // a plain SET removes the old timeout
+
+	if got := s.PTTL("a"); got != ttlNoExpiry {
+		t.Fatalf("got %d, want %d", got, ttlNoExpiry)
+	}
+}
+
+func TestActiveExpiry(t *testing.T) {
+	s := NewStore()
+	for i := 0; i < 100; i++ {
+		s.SetWithTTL("key:"+strconv.Itoa(i), "v", 20*time.Millisecond)
+	}
+
+	done := make(chan struct{})
+	defer close(done) // stop the loop when the test ends
+	go s.RunExpiryLoop(10*time.Millisecond, done)
+
+	time.Sleep(200 * time.Millisecond)
+
+	// Nobody read these keys, so only active expiry could have removed them.
+	if n := s.DBSize(); n != 0 {
+		t.Fatalf("expected 0 keys in memory, got %d", n)
 	}
 }

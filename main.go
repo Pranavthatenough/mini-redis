@@ -5,10 +5,16 @@ import (
 	"log"
 	"net"
 	"strings"
+	"time"
 )
 
 func main() {
 	store := NewStore() // one store shared by all clients
+
+	// Start active expiry in the background.
+	// done will be closed on shutdown in Phase 7.
+	done := make(chan struct{})
+	go store.RunExpiryLoop(100*time.Millisecond, done)
 
 	listener, err := net.Listen("tcp", ":6380")
 	if err != nil {

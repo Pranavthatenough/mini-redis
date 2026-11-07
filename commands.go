@@ -1,20 +1,29 @@
 package main
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+	"time"
+)
 
 // A handler takes the store and the command's arguments and returns a reply.
 type handlerFunc func(store *Store, args []Value) Value
 
 var commands = map[string]handlerFunc{
-	"PING":   ping,
-	"ECHO":   echo,
-	"SET":    set,
-	"GET":    get,
-	"DEL":    del,
-	"EXISTS": exists,
-	"INCR":   incr,
-	"DECR":   decr,
-	"KEYS":   keys,
+	"PING":    ping,
+	"ECHO":    echo,
+	"SET":     set,
+	"GET":     get,
+	"DEL":     del,
+	"EXISTS":  exists,
+	"INCR":    incr,
+	"DECR":    decr,
+	"KEYS":    keys,
+	"EXPIRE":  expire,
+	"TTL":     ttl,
+	"PTTL":    pttl,
+	"PERSIST": persist,
+	"DBSIZE":  dbsize,
 }
 
 func handleCommand(store *Store, command string, args []Value) Value {
@@ -53,12 +62,35 @@ func echo(store *Store, args []Value) Value {
 	return bulkString(args[0].str)
 }
 
-// SET key value
+// SET key value [EX seconds | PX milliseconds]
 func set(store *Store, args []Value) Value {
-	if len(args) != 2 {
+	if len(args) < 2 {
 		return wrongArgs("set")
 	}
-	store.Set(args[0].str, args[1].str)
+	if len(args) != 2 && len(args) != 4 {
+		return errorValue("ERR syntax error")
+	}
+
+	var expiry time.Duration
+	if len(args) == 4 {
+		n, err := strconv.Atoi(args[3].str)
+		if err != nil {
+			return errorValue(ErrNotInteger.Error())
+		}
+		if n <= 0 {
+			return errorValue("ERR invalid expire time in 'set' command")
+		}
+		switch strings.ToUpper(args[2].str) {
+		case "EX":
+			expiry = time.Duration(n) * time.Second
+		case "PX":
+			expiry = time.Duration(n) * time.Millisecond
+		default:
+			return errorValue("ERR syntax error")
+		}
+	}
+
+	store.SetWithTTL(args[0].str, args[1].str, expiry)
 	return simpleString("OK")
 }
 
@@ -134,4 +166,58 @@ func keys(store *Store, args []Value) Value {
 		result.array = append(result.array, bulkString(key))
 	}
 	return result
+}
+
+// EXPIRE key seconds  -> 1 if the timeout was set, 0 if the key is missing
+func expire(store *Store, args []Value) Value {
+	if len(args) != 2 {
+		return wrongArgs("expire")
+	}
+	seconds, err := strconv.Atoi(args[1].str)
+	if err != nil {
+		return errorValue(ErrNotInteger.Error())
+	}
+	if store.Expire(args[0].str, time.Duration(seconds)*time.Second) {
+		return integer(1)
+	}
+	return integer(0)
+}
+
+// TTL key  -> seconds left, -1 if no expiry, -2 if missing
+func ttl(store *Store, args []Value) Value {
+	if len(args) != 1 {
+		return wrongArgs("ttl")
+	}
+	ms := store.PTTL(args[0].str)
+	if ms < 0 {
+		return integer(int(ms))
+	}
+	return integer(int((ms + 500) / 1000)) // round to the nearest second
+}
+
+// PTTL key  -> milliseconds left, -1 if no expiry, -2 if missing
+func pttl(store *Store, args []Value) Value {
+	if len(args) != 1 {
+		return wrongArgs("pttl")
+	}
+	return integer(int(store.PTTL(args[0].str)))
+}
+
+// PERSIST key  -> 1 if a timeout was removed, 0 otherwise
+func persist(store *Store, args []Value) Value {
+	if len(args) != 1 {
+		return wrongArgs("persist")
+	}
+	if store.Persist(args[0].str) {
+		return integer(1)
+	}
+	return integer(0)
+}
+
+// DBSIZE  -> number of keys in memory
+func dbsize(store *Store, args []Value) Value {
+	if len(args) != 0 {
+		return wrongArgs("dbsize")
+	}
+	return integer(store.DBSize())
 }
