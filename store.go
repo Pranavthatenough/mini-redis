@@ -149,7 +149,14 @@ func (s *Store) Keys(pattern string) []string {
 
 // Expire sets a timeout on an existing key. Returns false if the key is missing.
 // A ttl of zero or less deletes the key right away, like Redis.
+// Expire sets a timeout on an existing key. Returns false if the key is missing.
 func (s *Store) Expire(key string, ttl time.Duration) bool {
+	return s.ExpireAt(key, time.Now().Add(ttl))
+}
+
+// ExpireAt sets an absolute deadline on an existing key.
+// A deadline that has already passed deletes the key right away, like Redis.
+func (s *Store) ExpireAt(key string, deadline time.Time) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -157,12 +164,12 @@ func (s *Store) Expire(key string, ttl time.Duration) bool {
 	if _, ok := s.data[key]; !ok {
 		return false
 	}
-	if ttl <= 0 {
+	if !deadline.After(time.Now()) {
 		delete(s.data, key)
 		delete(s.expires, key)
 		return true
 	}
-	s.expires[key] = time.Now().Add(ttl)
+	s.expires[key] = deadline
 	return true
 }
 

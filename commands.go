@@ -10,20 +10,21 @@ import (
 type handlerFunc func(store *Store, args []Value) Value
 
 var commands = map[string]handlerFunc{
-	"PING":    ping,
-	"ECHO":    echo,
-	"SET":     set,
-	"GET":     get,
-	"DEL":     del,
-	"EXISTS":  exists,
-	"INCR":    incr,
-	"DECR":    decr,
-	"KEYS":    keys,
-	"EXPIRE":  expire,
-	"TTL":     ttl,
-	"PTTL":    pttl,
-	"PERSIST": persist,
-	"DBSIZE":  dbsize,
+	"PING":      ping,
+	"ECHO":      echo,
+	"SET":       set,
+	"GET":       get,
+	"DEL":       del,
+	"EXISTS":    exists,
+	"INCR":      incr,
+	"DECR":      decr,
+	"KEYS":      keys,
+	"EXPIRE":    expire,
+	"TTL":       ttl,
+	"PTTL":      pttl,
+	"PERSIST":   persist,
+	"DBSIZE":    dbsize,
+	"PEXPIREAT": pexpireat,
 }
 
 func handleCommand(store *Store, command string, args []Value) Value {
@@ -220,4 +221,19 @@ func dbsize(store *Store, args []Value) Value {
 		return wrongArgs("dbsize")
 	}
 	return integer(store.DBSize())
+}
+
+// PEXPIREAT key unix-time-in-milliseconds  -> 1 if set, 0 if key missing
+func pexpireat(store *Store, args []Value) Value {
+	if len(args) != 2 {
+		return wrongArgs("pexpireat")
+	}
+	ms, err := strconv.ParseInt(args[1].str, 10, 64)
+	if err != nil {
+		return errorValue(ErrNotInteger.Error())
+	}
+	if store.ExpireAt(args[0].str, time.UnixMilli(ms)) {
+		return integer(1)
+	}
+	return integer(0)
 }
