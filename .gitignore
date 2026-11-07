@@ -1,1 +1,3 @@
 appendonly.aof
+cover.out
+mini-redis

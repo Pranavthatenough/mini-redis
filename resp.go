@@ -62,6 +62,15 @@ func (r *Resp) Read() (Value, error) {
 		return r.readArray()
 	case '$':
 		return r.readBulk()
+	case '+':
+		line, err := r.readLine()
+		return Value{typ: "string", str: line}, err
+	case '-':
+		line, err := r.readLine()
+		return Value{typ: "error", str: line}, err
+	case ':':
+		n, err := r.readInteger()
+		return Value{typ: "integer", num: n}, err
 	default:
 		return Value{}, fmt.Errorf("protocol error: unknown type %q", typ)
 	}
