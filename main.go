@@ -8,6 +8,8 @@ import (
 )
 
 func main() {
+	store := NewStore() // one store shared by all clients
+
 	listener, err := net.Listen("tcp", ":6380")
 	if err != nil {
 		log.Fatal("could not start server:", err)
@@ -20,11 +22,11 @@ func main() {
 			log.Println("accept error:", err)
 			continue
 		}
-		go handleConn(conn)
+		go handleConn(conn, store)
 	}
 }
 
-func handleConn(conn net.Conn) {
+func handleConn(conn net.Conn, store *Store) {
 	defer conn.Close()
 
 	addr := conn.RemoteAddr().String()
@@ -42,7 +44,7 @@ func handleConn(conn net.Conn) {
 		}
 
 		if value.typ != "array" || len(value.array) == 0 {
-			conn.Write(Value{typ: "error", str: "ERR invalid request"}.Marshal())
+			conn.Write(errorValue("ERR invalid request").Marshal())
 			continue
 		}
 
@@ -50,26 +52,7 @@ func handleConn(conn net.Conn) {
 		args := value.array[1:]
 		log.Println("command:", command)
 
-		reply := handleCommand(command, args)
+		reply := handleCommand(store, command, args)
 		conn.Write(reply.Marshal())
-	}
-}
-
-func handleCommand(command string, args []Value) Value {
-	switch command {
-	case "PING":
-		if len(args) == 0 {
-			return Value{typ: "string", str: "PONG"}
-		}
-		return Value{typ: "bulk", str: args[0].str}
-
-	case "ECHO":
-		if len(args) != 1 {
-			return Value{typ: "error", str: "ERR wrong number of arguments for 'echo' command"}
-		}
-		return Value{typ: "bulk", str: args[0].str}
-
-	default:
-		return Value{typ: "error", str: "ERR unknown command '" + command + "'"}
 	}
 }
