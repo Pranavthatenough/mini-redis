@@ -10,21 +10,37 @@ import (
 type handlerFunc func(store *Store, args []Value) Value
 
 var commands = map[string]handlerFunc{
-	"PING":      ping,
-	"ECHO":      echo,
-	"SET":       set,
-	"GET":       get,
+	// strings
+	"PING": ping,
+	"ECHO": echo,
+	"SET":  set,
+	"GET":  get,
+	"INCR": incr,
+	"DECR": decr,
+	// any type
 	"DEL":       del,
 	"EXISTS":    exists,
-	"INCR":      incr,
-	"DECR":      decr,
 	"KEYS":      keys,
+	"TYPE":      typeCommand,
 	"EXPIRE":    expire,
+	"PEXPIREAT": pexpireat,
 	"TTL":       ttl,
 	"PTTL":      pttl,
 	"PERSIST":   persist,
 	"DBSIZE":    dbsize,
-	"PEXPIREAT": pexpireat,
+	// lists
+	"LPUSH":  lpush,
+	"RPUSH":  rpush,
+	"LPOP":   lpop,
+	"RPOP":   rpop,
+	"LLEN":   llen,
+	"LRANGE": lrange,
+	// hashes
+	"HSET":    hset,
+	"HGET":    hget,
+	"HDEL":    hdel,
+	"HGETALL": hgetall,
+	"HLEN":    hlen,
 }
 
 func handleCommand(store *Store, command string, args []Value) Value {
@@ -96,12 +112,16 @@ func set(store *Store, args []Value) Value {
 }
 
 // GET key
+// GET key
 func get(store *Store, args []Value) Value {
 	if len(args) != 1 {
 		return wrongArgs("get")
 	}
-	value, ok := store.Get(args[0].str)
-	if !ok {
+	value, found, err := store.GetString(args[0].str)
+	if err != nil {
+		return errorValue(err.Error())
+	}
+	if !found {
 		return nullValue()
 	}
 	return bulkString(value)
@@ -236,4 +256,166 @@ func pexpireat(store *Store, args []Value) Value {
 		return integer(1)
 	}
 	return integer(0)
+}
+
+// ---- more helpers ----
+
+// arrayOf turns []string into a RESP array of bulk strings.
+func arrayOf(items []string) Value {
+	result := Value{typ: "array", array: make([]Value, 0, len(items))}
+	for _, item := range items {
+		result.array = append(result.array, bulkString(item))
+	}
+	return result
+}
+
+// stringsOf turns []Value into []string.
+func stringsOf(args []Value) []string {
+	out := make([]string, len(args))
+	for i, arg := range args {
+		out[i] = arg.str
+	}
+	return out
+}
+
+// TYPE key  ("type" is a Go keyword, so the function needs another name)
+func typeCommand(store *Store, args []Value) Value {
+	if len(args) != 1 {
+		return wrongArgs("type")
+	}
+	return simpleString(store.Type(args[0].str))
+}
+
+// ---- lists ----
+
+func push(store *Store, args []Value, left bool, name string) Value {
+	if len(args) < 2 {
+		return wrongArgs(name)
+	}
+	n, err := store.Push(args[0].str, stringsOf(args[1:]), left)
+	if err != nil {
+		return errorValue(err.Error())
+	}
+	return integer(n)
+}
+
+// LPUSH key value [value ...]  -> new length
+func lpush(store *Store, args []Value) Value { return push(store, args, true, "lpush") }
+
+// RPUSH key value [value ...]  -> new length
+func rpush(store *Store, args []Value) Value { return push(store, args, false, "rpush") }
+
+func pop(store *Store, args []Value, left bool, name string) Value {
+	if len(args) != 1 {
+		return wrongArgs(name)
+	}
+	value, found, err := store.Pop(args[0].str, left)
+	if err != nil {
+		return errorValue(err.Error())
+	}
+	if !found {
+		return nullValue()
+	}
+	return bulkString(value)
+}
+
+// LPOP key  -> first item, or nil
+func lpop(store *Store, args []Value) Value { return pop(store, args, true, "lpop") }
+
+// RPOP key  -> last item, or nil
+func rpop(store *Store, args []Value) Value { return pop(store, args, false, "rpop") }
+
+// LLEN key
+func llen(store *Store, args []Value) Value {
+	if len(args) != 1 {
+		return wrongArgs("llen")
+	}
+	n, err := store.LLen(args[0].str)
+	if err != nil {
+		return errorValue(err.Error())
+	}
+	return integer(n)
+}
+
+// LRANGE key start stop
+func lrange(store *Store, args []Value) Value {
+	if len(args) != 3 {
+		return wrongArgs("lrange")
+	}
+	start, err1 := strconv.Atoi(args[1].str)
+	stop, err2 := strconv.Atoi(args[2].str)
+	if err1 != nil || err2 != nil {
+		return errorValue(ErrNotInteger.Error())
+	}
+	items, err := store.LRange(args[0].str, start, stop)
+	if err != nil {
+		return errorValue(err.Error())
+	}
+	return arrayOf(items)
+}
+
+// ---- hashes ----
+
+// HSET key field value [field value ...]  -> number of new fields
+func hset(store *Store, args []Value) Value {
+	// Need a key plus at least one field/value pair, and pairs must be complete.
+	if len(args) < 3 || (len(args)-1)%2 != 0 {
+		return wrongArgs("hset")
+	}
+	n, err := store.HSet(args[0].str, stringsOf(args[1:]))
+	if err != nil {
+		return errorValue(err.Error())
+	}
+	return integer(n)
+}
+
+// HGET key field
+func hget(store *Store, args []Value) Value {
+	if len(args) != 2 {
+		return wrongArgs("hget")
+	}
+	value, found, err := store.HGet(args[0].str, args[1].str)
+	if err != nil {
+		return errorValue(err.Error())
+	}
+	if !found {
+		return nullValue()
+	}
+	return bulkString(value)
+}
+
+// HDEL key field [field ...]  -> number of fields removed
+func hdel(store *Store, args []Value) Value {
+	if len(args) < 2 {
+		return wrongArgs("hdel")
+	}
+	n, err := store.HDel(args[0].str, stringsOf(args[1:]))
+	if err != nil {
+		return errorValue(err.Error())
+	}
+	return integer(n)
+}
+
+// HGETALL key  -> [field1, value1, field2, value2, ...]
+func hgetall(store *Store, args []Value) Value {
+	if len(args) != 1 {
+		return wrongArgs("hgetall")
+	}
+	items, err := store.HGetAll(args[0].str)
+	if err != nil {
+		return errorValue(err.Error())
+	}
+	return arrayOf(items)
+}
+
+// HLEN key
+func hlen(store *Store, args []Value) Value {
+	if len(args) != 1 {
+		return wrongArgs("hlen")
+	}
+	n, err := store.HLen(args[0].str)
+	if err != nil {
+		return errorValue(err.Error())
+	}
+	return integer(n)
 }

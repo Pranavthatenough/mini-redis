@@ -102,6 +102,7 @@ func (a *AOF) Replay(apply func(v Value)) (int, error) {
 // ---- deciding what to write ----
 
 // writeCommands lists the commands that change data and must be logged.
+// writeCommands lists the commands that change data and must be logged.
 var writeCommands = map[string]bool{
 	"SET":       true,
 	"DEL":       true,
@@ -110,6 +111,12 @@ var writeCommands = map[string]bool{
 	"EXPIRE":    true,
 	"PEXPIREAT": true,
 	"PERSIST":   true,
+	"LPUSH":     true,
+	"RPUSH":     true,
+	"LPOP":      true, // popping removes an item, so it's a write
+	"RPOP":      true,
+	"HSET":      true,
+	"HDEL":      true,
 }
 
 // commandValue builds a RESP command array, like ["SET", "name", "pranav"].
